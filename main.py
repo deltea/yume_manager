@@ -1,0 +1,180 @@
+from pathlib import Path
+import shutil
+import json
+import colorsys
+import argparse
+import numpy as np
+from io import BytesIO
+from PIL import Image, ImageFilter
+from mutagen.mp3 import MP3
+from mutagen.id3 import ID3, APIC
+
+def extract_metadata(path):
+    info = {
+        "title": None,
+        "artist": None,
+        "duration": None,
+        "cover": None
+    }
+
+    try:
+        audio = MP3(path, ID3=ID3)
+
+        if "TIT2" in audio:
+            info["title"] = audio["TIT2"].text[0]
+        if "TPE1" in audio:
+            info["artist"] = audio["TPE1"].text[0]
+
+        info["duration"] = int(audio.info.length)
+
+        for tag in audio.tags.values():
+            if isinstance(tag, APIC):
+                info["cover"] = Image.open(BytesIO(tag.data)).convert("RGB")
+                break
+
+    except Exception as e:
+        print(f"[error] couldn't extract info: {e}")
+
+    return info
+
+def crop_image(image):
+    w, h = image.size
+    s = min(w, h)
+    return image.crop(((w - s) // 2, (h - s) // 2, (w + s) // 2, (h + s) // 2))
+
+def get_accent_color(image):
+    small_img = image.resize((10, 10))
+    best_color = (255, 255, 255)
+    best_score = 0
+
+    def contrast_against_black(r, g, b):
+        return (0.299 * r + 0.587 * g + 0.114 * b) / 255.0
+
+    for pixel in small_img.getdata():
+        r, g, b = pixel
+        h, s, v = colorsys.rgb_to_hsv(r / 255.0, g / 255.0, b / 255.0)
+
+        if v < 0.2: continue
+
+        vibrancy = s * v
+        contrast = contrast_against_black(r, g, b)
+
+        score = vibrancy * 0.6 + contrast * 0.4
+
+        if score > best_score:
+            best_score = score
+            best_color = (r, g, b)
+
+    h, s, v = colorsys.rgb_to_hsv(*[x / 255.0 for x in best_color])
+
+    s = min(s * 1.1, 1.0)
+    v = min(v * 1.1, 1.0)
+
+    r, g, b = colorsys.hsv_to_rgb(h, s, v)
+    return tuple(int(c * 255) for c in (r, g, b))
+
+def adaptive_threshold(image_array, low_frac=0.3, high_frac=0.7):
+    brightness = np.mean(image_array, axis=2)
+    flat = brightness.flatten()
+    sorted_vals = np.sort(flat)
+    low_thresh = sorted_vals[int(len(sorted_vals) * low_frac)]
+    high_thresh = sorted_vals[int(len(sorted_vals) * high_frac)]
+    return low_thresh, high_thresh
+
+def sharpen_image(image, accent):
+    arr = np.array(image)
+    low, high = adaptive_threshold(arr)
+    brightness = np.mean(arr, axis=2)
+    output = np.zeros_like(arr)
+
+    for y in range(arr.shape[0]):
+        for x in range(arr.shape[1]):
+            b = brightness[y, x]
+            if b < low:
+                output[y, x] = (0, 0, 0)
+            elif b > high:
+                output[y, x] = (255, 255, 255)
+            else:
+                output[y, x] = accent
+
+    return Image.fromarray(output)
+
+def enhance_contrast(image):
+    arr = np.array(image).astype(np.float32) / 255.0
+    min_val = np.percentile(arr, 2)
+    max_val = np.percentile(arr, 98)
+    arr = np.clip((arr - min_val) / (max_val - min_val), 0, 1)
+    return Image.fromarray((arr * 255).astype(np.uint8))
+
+def rgb888_to_rgb565(r, g, b):
+    return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
+
+def process_mp3(path, output_dir):
+    metadata = extract_metadata(path)
+
+    if not metadata:
+        print("no metadata found")
+        return
+
+    # crop and resize image
+    cover = crop_image(metadata["cover"])
+    cover = cover.resize((86, 86), Image.LANCZOS)
+
+    # extract dominant accent color
+    accent = get_accent_color(cover)
+    print(f"dominant color is {accent}")
+    
+
+    # enhance contrast
+    cover = enhance_contrast(cover)
+    cover = cover.filter(ImageFilter.UnsharpMask(radius=1, percent=150, threshold=2))
+
+    # sharpen with adaptive thresholding
+    cover = sharpen_image(cover, accent)
+
+    if (output_dir):
+        # create output directory if it doesn't exist
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # write to .raw file
+        with open(output_dir / "cover.raw", "wb") as f:
+            for pixel in cover.getdata():
+                r = pixel[0] >> 3
+                g = pixel[1] >> 2
+                b = pixel[2] >> 3
+                value = (r << 11) | (g << 5) | b
+                f.write(value.to_bytes(2, "little"))
+
+        # write metadata to json file
+        del metadata["cover"]
+        metadata["color"] = rgb888_to_rgb565(*accent)
+        with open(output_dir / "track.json", "w") as f:
+            json.dump(metadata, f, indent=2)
+    else:
+        cover.show()
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="convert mp3 cover art to image with 3-color dithering")
+    parser.add_argument("input_mp3", help="path to the mp3 file")
+    parser.add_argument("output_dir", help="where to save the bitmap", nargs="?", default="")
+    args = parser.parse_args()
+
+    input_path = Path(args.input_mp3)
+    output_dir = Path(args.output_dir)
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    if input_path.is_file():
+        # add a single mp3 file
+        print(f"adding {input_path.name} to library...")
+        shutil.copy(input_path, output_dir / input_path.name)
+        process_mp3(args.input_mp3, output_dir / ".bumpi" / input_path.stem)
+    else:
+        # add all mp3 files in a directory
+        print(f"adding all mp3 files in {input_path} to library...")
+        for item in input_path.iterdir():
+            if item.is_file() and item.suffix.lower() == ".mp3":
+                print(f"adding {item.name} to library...")
+                shutil.copy(input_path / item.name, output_dir / item.name)
+                process_mp3(item, output_dir / ".bumpi" / item.stem)
+            else:
+                print(f"skipping {item.name}, not an mp3 file")
