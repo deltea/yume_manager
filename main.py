@@ -138,7 +138,7 @@ def write_mp3(path: Path, output_dir: Path, playlist: Path = None):
         print(f"skipped {path.name}")
         return
 
-    mp3_dir = output_dir / path.stem
+    mp3_dir = output_dir / "tracks" / path.stem
 
     # don't write if mp3 folder already exists
     if mp3_dir.exists():
@@ -170,6 +170,9 @@ def write_mp3(path: Path, output_dir: Path, playlist: Path = None):
 
     # add to playlist if necessary
     if playlist:
+        # make sure the playlists folder exists
+        playlist.parent.mkdir(parents=True, exist_ok=True)
+
         # create new playlist file if it doesn't exist
         if playlist.exists():
             with open(playlist, "r") as f:
@@ -190,13 +193,13 @@ def write_mp3(path: Path, output_dir: Path, playlist: Path = None):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="manage mp3 files and metadata in the yume library")
     parser.add_argument("input", help="path to the mp3 file or directory containing mp3 files to add")
-    parser.add_argument("output", help="directory to copy the files to", default="/Volumes/YUME")
+    parser.add_argument("output", help="directory to copy the files to", default="/Volumes/YUME", nargs="?")
     parser.add_argument("--playlist", "-p", help="name of the playlist file to add the mp3 files to", default=None)
     args = parser.parse_args()
 
     input_path = Path(args.input)
     output_dir = Path(args.output)
-    playlist = Path(output_dir / (args.playlist + ".json")) if args.playlist else None
+    playlist = Path(output_dir / "playlists" / (args.playlist + ".json")) if args.playlist else None
 
     output_dir.mkdir(parents=True, exist_ok=True)
     if input_path.is_file():
@@ -208,4 +211,4 @@ if __name__ == "__main__":
             write_mp3(item, output_dir, playlist)
             print()
 
-    print("\n~ enjoy! ~")
+    print("~ enjoy! ~")
