@@ -109,7 +109,7 @@ def enhance_contrast(image):
 def rgb888_to_rgb565(r, g, b):
     return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
 
-def process_mp3(path, output_dir):
+def process_mp3(path: Path):
     metadata = extract_metadata(path)
 
     if not metadata:
@@ -131,57 +131,79 @@ def process_mp3(path, output_dir):
     # sharpen with adaptive thresholding
     cover = sharpen_image(cover, accent)
 
-    if (output_dir):
-        # create output directory if it doesn't exist
-        output_dir.mkdir(parents=True, exist_ok=True)
+    return cover, accent, metadata
 
-        # write to .raw file
-        with open(output_dir / "cover.raw", "wb") as f:
+def write_mp3(path: Path, output_dir: Path, playlist: Path = None):
+    if not path.is_file() or path.suffix.lower() not in [".mp3", ".wav"]:
+        print(f"skipped {path.name}")
+        return
+
+    mp3_dir = output_dir / path.stem
+
+    # don't write if mp3 folder already exists
+    if mp3_dir.exists():
+        print(f"\"{path.name}\" already exists, skipping...")
+    else:
+        print(f"adding \"{path.name}\" to library...")
+        mp3_dir.mkdir(parents=True, exist_ok=True)
+
+        # write mp3 file and metadata to individual folders
+        shutil.copy(path, mp3_dir / ("audio" + path.suffix.lower()))
+        cover, accent, metadata = process_mp3(path)
+
+        # write cover to .raw file
+        with open(mp3_dir / "cover.raw", "wb") as f:
             for pixel in cover.getdata():
                 r = pixel[0] >> 3
                 g = pixel[1] >> 2
                 b = pixel[2] >> 3
                 value = (r << 11) | (g << 5) | b
                 f.write(value.to_bytes(2, "little"))
+        del metadata["cover"]
+
+        # write accent color to metadata
+        metadata["color"] = rgb888_to_rgb565(*accent)
 
         # write metadata to json file
-        del metadata["cover"]
-        metadata["color"] = rgb888_to_rgb565(*accent)
-        with open(output_dir / "track.json", "w") as f:
+        with open(mp3_dir / "track.json", "w") as f:
             json.dump(metadata, f, indent=2)
-    else:
-        cover.show()
 
-def write_mp3(path: Path, output_dir: Path):
-    if not path.is_file() or path.suffix.lower() not in [".mp3", ".wav"]:
-        print(f"skipped {path.name}")
-        return
+    # add to playlist if necessary
+    if playlist:
+        # add track to playlist json file
+        if playlist.exists():
+            with open(playlist, "r") as f:
+                playlist_data = json.load(f)
+        else:
+            playlist_data = { "tracks": [] }
 
-    print(f"adding {path.name} to library...")
+        if mp3_dir.name in playlist_data["tracks"]:
+            print(f"\"{path.name}\" already in playlist, skipping...")
+        else:
+            print(f"adding \"{path.name}\" to playlist \"{playlist.stem}\"...")
 
-    mp3_dir = output_dir / path.stem
-    mp3_dir.mkdir(parents=True, exist_ok=True)
-
-    # write mp3 file and metadata to individual folders
-    shutil.copy(path, mp3_dir / path.name)
-    process_mp3(path, mp3_dir)
+            playlist_data["tracks"].append(mp3_dir.name)
+            with open(playlist, "w") as f:
+                json.dump(playlist_data, f, indent=2)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="manage mp3 files and metadata in the yume library")
     parser.add_argument("input", help="path to the mp3 file or directory containing mp3 files to add")
     parser.add_argument("output", help="directory to copy the files to", default="/Volumes/YUME")
+    parser.add_argument("--playlist", "-p", help="name of the playlist file to add the mp3 files to", default=None)
     args = parser.parse_args()
 
     input_path = Path(args.input)
     output_dir = Path(args.output)
+    playlist = Path(output_dir / (args.playlist + ".json")) if args.playlist else None
 
     output_dir.mkdir(parents=True, exist_ok=True)
     if input_path.is_file():
-        write_mp3(input_path, output_dir)
+        write_mp3(input_path, output_dir, playlist)
     else:
         # add all mp3 files in a directory
-        print(f"adding all mp3 files in {input_path} to library...")
+        print(f"adding all mp3 files in \"{input_path}\" to library...")
         for item in input_path.iterdir():
-            write_mp3(item, output_dir)
+            write_mp3(item, output_dir, playlist)
 
-    print("enjoy! :)")
+    print("~ enjoy! ~")
