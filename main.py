@@ -170,7 +170,7 @@ def write_mp3(path: Path, output_dir: Path, playlist: Path = None):
 
     # add to playlist if necessary
     if playlist:
-        # add track to playlist json file
+        # create new playlist file if it doesn't exist
         if playlist.exists():
             with open(playlist, "r") as f:
                 playlist_data = json.load(f)
@@ -182,6 +182,7 @@ def write_mp3(path: Path, output_dir: Path, playlist: Path = None):
         else:
             print(f"adding \"{path.name}\" to playlist \"{playlist.stem}\"...")
 
+            # add track to playlist json file
             playlist_data["tracks"].append(mp3_dir.name)
             with open(playlist, "w") as f:
                 json.dump(playlist_data, f, indent=2)
@@ -202,8 +203,9 @@ if __name__ == "__main__":
         write_mp3(input_path, output_dir, playlist)
     else:
         # add all mp3 files in a directory
-        print(f"adding all mp3 files in \"{input_path}\" to library...")
+        print(f"adding all mp3 files in \"{input_path}\" to library...\n")
         for item in input_path.iterdir():
             write_mp3(item, output_dir, playlist)
+            print()
 
-    print("~ enjoy! ~")
+    print("\n~ enjoy! ~")
