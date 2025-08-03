@@ -123,7 +123,6 @@ def process_mp3(path, output_dir):
     # extract dominant accent color
     accent = get_accent_color(cover)
     print(f"dominant color is {accent}")
-    
 
     # enhance contrast
     cover = enhance_contrast(cover)
@@ -153,28 +152,36 @@ def process_mp3(path, output_dir):
     else:
         cover.show()
 
+def write_mp3(path: Path, output_dir: Path):
+    if not path.is_file() or path.suffix.lower() not in [".mp3", ".wav"]:
+        print(f"skipped {path.name}")
+        return
+
+    print(f"adding {path.name} to library...")
+
+    mp3_dir = output_dir / path.stem
+    mp3_dir.mkdir(parents=True, exist_ok=True)
+
+    # write mp3 file and metadata to individual folders
+    shutil.copy(path, mp3_dir / path.name)
+    process_mp3(path, mp3_dir)
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="convert mp3 cover art to image with 3-color dithering")
-    parser.add_argument("input_mp3", help="path to the mp3 file")
-    parser.add_argument("output_dir", help="where to save the bitmap", nargs="?", default="")
+    parser = argparse.ArgumentParser(description="manage mp3 files and metadata in the yume library")
+    parser.add_argument("input", help="path to the mp3 file or directory containing mp3 files to add")
+    parser.add_argument("output", help="directory to copy the files to", default="/Volumes/YUME")
     args = parser.parse_args()
 
-    input_path = Path(args.input_mp3)
-    output_dir = Path(args.output_dir)
+    input_path = Path(args.input)
+    output_dir = Path(args.output)
 
     output_dir.mkdir(parents=True, exist_ok=True)
     if input_path.is_file():
-        # add a single mp3 file
-        print(f"adding {input_path.name} to library...")
-        shutil.copy(input_path, output_dir / input_path.name)
-        process_mp3(args.input_mp3, output_dir / ".bumpi" / input_path.stem)
+        write_mp3(input_path, output_dir)
     else:
         # add all mp3 files in a directory
         print(f"adding all mp3 files in {input_path} to library...")
         for item in input_path.iterdir():
-            if item.is_file() and item.suffix.lower() == ".mp3":
-                print(f"adding {item.name} to library...")
-                shutil.copy(input_path / item.name, output_dir / item.name)
-                process_mp3(item, output_dir / ".bumpi" / item.stem)
-            else:
-                print(f"skipping {item.name}, not an mp3 file")
+            write_mp3(item, output_dir)
+
+    print("enjoy! :)")

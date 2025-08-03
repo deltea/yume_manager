@@ -1,0 +1,4 @@
+#!/bin/bash
+
+source /Users/leo/coding/terminal/yume_manager/venv/bin/activate
+python3 /Users/leo/coding/terminal/yume_manager/main.py "$@"
